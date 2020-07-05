@@ -1,36 +1,18 @@
+import types
+import printer
+import core
+
 import nre
 import sequtils
 import strutils
 import parseutils
-type
-  MalKind* = enum
-    MalSym,MalNum,MalString,MalList,MalVector,MalTable
-  MalNode* = object
-    case kind:MalKind
-    of MalList,MalVector,MalTable:
-      list:seq[MalNode]
-    of MalSym:
-      ident*:string
-    of MalNum:
-      num:int
-    of MalString:
-      str:string
+import tables
 
+type
   Token = string
   Reader = object
     tokens: seq[Token]
     position: int
-
-#FAILING TESTS:
-# 'x => (quote x)
-# '(1 2 3) => (quote (1 2 3))
-# `x => (quasiquote x)
-# `(1 2 3) => (quasiquote (1 2 3))
-# ~x => (unquote x)
-# ~(1 2 3) => (unquote (1 2 3))
-# ~@(1 2 3) => (splice-unquote (1 2 3))
-# @a => (deref a)
-# ^a b => (with-meta b a)
 
 #----------forward decl------------#
 proc read_form(r:var Reader):MalNode
@@ -45,53 +27,26 @@ proc next(r:var Reader):Token =
 proc peek(r:Reader):Token =
   r.tokens[r.position]
 proc tokenize(s:string):Reader =
-  let pattern = re"""[\s,]*(~@|[\[\]{}()'`~^@]|"(?:\\.|[^\\"])*\"?|;.*|[^(\s)\[\]{}('\"`,;)]*)"""
+  let pattern = re"""[\s,]*(~@|τ|[\[\]{}()'`~^@]|"(?:\\.|[^\\"])*\"?|;.*|[^(\s)\[\]{}('\"`,;)]*)"""
   result.tokens = s.findAll(pattern).mapIt(it.strip(true,true,{' ',','}))
   
-proc `$`*(node:MalNode):string =
-  case node.kind
-  of MalSym:
-    node.ident
-  of MalNum:
-    $node.num
-  of MalString:#really take it out and then put it back?
-    var replacements = @[("\\","\\\\"),
-                        ("\"","\\\""),
-                        ("\n","\\n"),
-                        ("\r","\\r"),
-                        ("\t","\\t"),
-                        ("\a","\\a"),
-                        ("\b","\\b"),
-                        ("\f","\\f"),
-                        ("\v","\\v")]
-    for i in 0..6:
-      replacements.add(($char(i),'\\' & $i))
-    for i in 14..31:
-      replacements.add(($char(i),"\\x" & toHex($char(i))))
-    for i in 128..160:
-      replacements.add(($char(i),"\\x" & toHex($char(i))))
-    "\"" & node.str.multiReplace(replacements) & "\""
-  of MalList:
-    "(" & node.list.map(`$`).join(" ") & ")"
-  of MalVector:
-    "[" & node.list.map(`$`).join(" ") & "]"
-  of MalTable:
-    "{" & node.list.map(`$`).join(" ") & "}"
 proc read_str*(s:string):MalNode =
   var reader = tokenize(s)
   reader.read_form()
 
 template Magic(func_name:string):untyped =
   discard r.next()
-  MalNode(kind:MalList,list: @[MalNode(kind:MalSym,ident:`func_name`),r.readform()])
+  MalNode(kind:kList,lst: @[MalNode(kind:kSym,str:`func_name`),r.readform()])
 
-proc dumpTokens(r:Reader):MalNode =
-  result = MalNode(kind:MalList)
+proc dumpTokens(r:var Reader):MalNode =
+  discard r.next()
+  result = MalNode(kind:kList)
   for t in r.tokens:
-    result.list.add(MalNode(kind:MalString,str:t))
+    result.lst.add(MalNode(kind:kString,str:t))
 proc withMeta(r:var Reader):MalNode =
   result = Magic("with-meta")
-  result.list.insert(r.read_form(),1)
+  result.lst.insert(r.read_form(),1)
+
 proc read_form(r:var Reader):MalNode =
   case r.peek
   of "(":   r.read_list()
@@ -103,10 +58,10 @@ proc read_form(r:var Reader):MalNode =
   of "~@":  Magic("splice-unquote")
   of "@":   Magic("deref")
   of "^":   r.withMeta()
-  of "%":   r.dumpTokens()
+  of "τ":   r.dumpTokens()
   else:     r.read_atom()
 
-template read_container(cont_kind:MalKind,close_sym:string):untyped =
+template read_container(cont_kind:MalType,close_sym:string):untyped =
   discard r.next()
   result = MalNode(kind:`cont_kind`)
   while true:
@@ -117,24 +72,24 @@ template read_container(cont_kind:MalKind,close_sym:string):untyped =
         discard r.next
         return
       else:
-        result.list.add(r.read_form())
-proc read_vector(r:var Reader):MalNode = read_container(MalVector,"]")
-proc read_table(r:var Reader):MalNode = read_container(MalTable,"}")
-proc read_list(r:var Reader):MalNode = read_container(MalList,")")
-#  discard r.next()# '('
-#  result = MalNode(kind:MalList)
-#  while true:
-#    case r.peek
-#      of "":
-#        raise newException(ValueError,"EOF")
-#      of ")":
-#        discard r.next
-#        return
-#      else:
-#        result.list.add(r.read_form())
+          result.lst.add(r.read_form())
+proc read_vector(r:var Reader):MalNode = read_container(kVector,"]")
+
+proc read_table_tmp(r:var Reader):MalNode = read_container(kList,"}")
+proc read_table(r:var Reader):MalNode =
+  let tmp = r.read_table_tmp.lst
+  if ( tmp.len and 1 )==1:
+    raise newException(ValueError,"Error: uneven number of objects in table")
+  var pairs = newSeq[tuple[key:MalNode,val:MalNode]]()
+  for i in countup(0,tmp.len-1,2):
+    pairs.add((tmp[i],tmp[i+1]))
+
+  MalNode(kind:kTable,tab: pairs.toTable)
+
+proc read_list(r:var Reader):MalNode = 
+  read_container(kList,")")
 
 proc read_string(input:string):MalNode =
-  #truly need a thingy if we do hex or unicode
   var str:string
   type stateEnum = enum
     normal,escaped,byte0,byte1
@@ -175,7 +130,7 @@ proc read_string(input:string):MalNode =
       of '\\':
         state = escaped
       of '"':
-        return MalNode(kind:MalString,str:str)
+        return MalNode(kind:kString,str:str)
       else:
         str.add(input[i])
     of byte0:
@@ -199,9 +154,9 @@ proc read_atom(r:var Reader):MalNode =
   let atom = cast[string](r.next())
   var intval:int
   if parseInt(atom,intval,0)!=0:
-    MalNode(kind:MalNum,num:intval)
+    MalNode(kind:kNum,num:intval)
   elif atom[0]=='"':#string
     atom.read_string
-  else:#identifier
-    MalNode(kind:MalSym,ident:atom)
+  else:#strifier
+    MalNode(kind:kSym,str:atom)
 

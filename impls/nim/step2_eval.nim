@@ -1,6 +1,5 @@
 import linenoise
 import reader
-import types
 import printer
 import tables
 proc READ*(s:string):MalNode = read_str(s)
