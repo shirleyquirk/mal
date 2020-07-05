@@ -32,7 +32,7 @@ proc `$`*(node:MalNode):string =
   case node.kind
   of kSym:
     node.str
-  of kKeyword: node.str[1..^1]
+  of kKeyword: node.str[2..^1]
   of kNum:     $node.num
   of kString:  node.str.prettify.surround('"','"')
   of kList:    print_container('(',')')
@@ -50,7 +50,7 @@ proc `$`*(node:MalNode):string =
   of kNil:    "nil"
   of kTrue:   "true"
   of kFalse:  "false"
-
+  of kProc:   "<procedure>"
 
 when isMainModule:
   import reader

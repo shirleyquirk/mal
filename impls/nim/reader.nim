@@ -157,6 +157,8 @@ proc read_atom(r:var Reader):MalNode =
     MalNode(kind:kNum,num:intval)
   elif atom[0]=='"':#string
     atom.read_string
-  else:#strifier
+  elif atom[0]==':':#keyword
+    MalNode(kind:kKeyword,str:"ʞ" & atom)
+  else:
     MalNode(kind:kSym,str:atom)
 

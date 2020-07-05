@@ -2,7 +2,7 @@ import tables,hashes
 
 type
   MalType* = enum
-    kSym,kNum,kString,kList,kVector,kTable,kKeyword,kNil,kTrue,kFalse
+    kSym,kNum,kString,kList,kVector,kTable,kKeyword,kNil,kTrue,kFalse,kProc
   MalNode* = object
     case kind*:MalType
     of kList,kVector:         lst*:seq[MalNode]
@@ -10,7 +10,7 @@ type
     of kSym,kKeyword,kString: str*:string
     of kNum:                  num*:int
     of kNil,kTrue,kFalse :    nil
-
+    of kProc:                 f*:proc(x:int,y:int):int
 proc hash*(node:MalNode):Hash
 
 proc `==`*(a,b:MalNode):bool =
@@ -22,6 +22,7 @@ proc `==`*(a,b:MalNode):bool =
     of kSym,kKeyword,kString:  a.str == b.str
     of kNum:                   a.num == b.num
     of kNil,kTrue,kFalse:      true
+    of kProc:                  a.f  ==  b.f
 
 
 proc hash*(node:MalNode):Hash =
@@ -38,6 +39,8 @@ proc hash*(node:MalNode):Hash =
   of kNum:
     result = result !& hash(node.num)
   of kNil,kTrue,kFalse: discard
+  of kProc:
+    result = result !& hash(node.f)
   result = !$result
 
 when isMainModule:
